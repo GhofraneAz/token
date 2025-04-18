@@ -35,21 +35,28 @@ public class UserDetailsImpl implements UserDetails {
         this.authorities = authorities;
     }
 
-    public static UserDetailsImpl build(User user) {
-        // 🔥 Récupère toutes les permissions des rôles
-        List<GrantedAuthority> authorities = user.getRoles().stream()
-                .flatMap(role -> role.getPermissions().stream())
-                .map(permission -> new SimpleGrantedAuthority(permission.getName()))
-                .collect(Collectors.toList());
+ 
+        public static UserDetailsImpl build(User user) {
+            // Récupérer les rôles de l'utilisateur, et transformer en liste de GrantedAuthority
+            List<GrantedAuthority> authorities = user.getRoles().stream()
+                    .map(role -> new SimpleGrantedAuthority(role.getName().name()))  // Récupérer le nom du rôle
+                    .collect(Collectors.toList());
 
-        return new UserDetailsImpl(
-                user.getId(),
-                user.getUsername(),
-                user.getUsername(), // ou user.getEmail() si champ email est présent
-                user.getPassword(),
-                user.getActived(),
-                authorities);
-    }
+            // Assurer qu'il y a des rôles, sinon assigner un rôle par défaut
+            if (authorities.isEmpty()) {
+                authorities.add(new SimpleGrantedAuthority("ROLE_USER"));
+            }
+
+            // Retourner un UserDetailsImpl avec les valeurs correctes
+            return new UserDetailsImpl(
+                    user.getId(),
+                    user.getUsername(),
+                    user.getEmail() != null ? user.getEmail() : "",  // Assurer que l'email n'est pas nul
+                    user.getPassword(),
+                    user.getActived(),  // Vérifier que la méthode pour l'activation est correcte
+                    authorities);
+        }
+
 
     // Méthodes requises par l'interface UserDetails
 
@@ -75,7 +82,7 @@ public class UserDetailsImpl implements UserDetails {
 
     @Override
     public boolean isAccountNonLocked() {
-        return actived; // compte bloqué si non activé
+        return actived; // Compte bloqué si non activé
     }
 
     @Override

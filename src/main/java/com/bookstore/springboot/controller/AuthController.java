@@ -1,7 +1,9 @@
 package com.bookstore.springboot.controller;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -18,6 +20,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import com.bookstore.springboot.dto.AuthRequest;
+import com.bookstore.springboot.dto.SignupRequest;
+import com.bookstore.springboot.entity.ERole;
 import com.bookstore.springboot.entity.Role;
 import com.bookstore.springboot.entity.User;
 import com.bookstore.springboot.repository.RoleRepository;
@@ -55,67 +59,97 @@ public class AuthController {
     private Cache appUserCache;
 
     @PostMapping("/signin")
-    public ResponseEntity<Object> authenticateUser(@RequestBody AuthRequest loginRequest) {
+    public ResponseEntity<Map<String, String>> authenticateUser(@RequestBody User authenticationRequest) {
         try {
+            // Authentifier l'utilisateur
             Authentication authentication = authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()));
-
+                new UsernamePasswordAuthenticationToken(authenticationRequest.getUsername(), authenticationRequest.getPassword())
+            );
+            
+            // Enregistrer l'authentification dans le contexte de sécurité
             SecurityContextHolder.getContext().setAuthentication(authentication);
-
-            String jwt = jwtUtils.generateJwtToken(authentication);
-
+            
+            // Générer le token JWT
+            String token = jwtUtils.generateJwtToken(authentication);
+            
+            // Récupérer l'utilisateur authentifié
             UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-
-            List<String> roles = userDetails.getAuthorities().stream()
-                    .map(item -> item.getAuthority())
-                    .collect(Collectors.toList());
-
-            return ResponseHandler.generateResponse("Authentication successful.", HttpStatus.OK,
-                    new JwtResponse(jwt, null, userDetails.getUsername(), null, roles));
-
-        } catch (BadCredentialsException e) {
-            return ResponseHandler.generateResponse("Invalid username or password.", HttpStatus.UNAUTHORIZED, null);
+            
+            // Créer la réponse
+            Map<String, String> response = new HashMap<>();
+            response.put("token", token);
+            response.put("type", "Bearer");
+            response.put("username", userDetails.getUsername());
+            response.put("email", userDetails.getEmail()); // Assurez-vous que l'email est inclus
+            response.put("roles", userDetails.getAuthorities().toString()); // Assurez-vous que les rôles sont inclus
+            
+            // Retourner la réponse avec un statut 200 OK
+            return ResponseEntity.ok(response);
         } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseHandler.generateResponse("Server error.", HttpStatus.INTERNAL_SERVER_ERROR, null);
+            // En cas d'échec d'authentification
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("message", "Authentication failed");
+
+            // Retourner la réponse d'erreur avec un statut 401 Unauthorized
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse);
         }
     }
 
+
     @PostMapping("/signup")
-    public ResponseEntity<Object> registerUser(@RequestBody User signUpRequest) {
+    public ResponseEntity<?> registerUser(@RequestBody SignupRequest signUpRequest) {
         try {
-            // Check if the username already exists
+            // 1) Vérifier si le username existe déjà
             if (userRepository.existsByUsername(signUpRequest.getUsername())) {
-                return ResponseHandler.generateResponse("Username is already in use", HttpStatus.UNPROCESSABLE_ENTITY, null);
+                return ResponseHandler.generateResponse(
+                    "Username is already in use",
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    null
+                );
             }
 
-            // Encode the password
-            signUpRequest.setPassword(encoder.encode(signUpRequest.getPassword()));
+            // 2) Construire l’entité User à partir du DTO
+            User user = new User();
+            user.setUsername(signUpRequest.getUsername());
+            user.setEmail(signUpRequest.getEmail());
+            user.setPassword(encoder.encode(signUpRequest.getPassword()));
+            user.setActived(true);
 
-            // Activate user by default
-            signUpRequest.setActived(true);
-
-            // Assign roles passed in the request
+            // 3) Création des rôles à partir des strings envoyées par le front
             Set<Role> roles = new HashSet<>();
-            for (Role role : signUpRequest.getRoles()) {
-                // Retrieve role from the database
-                java.util.Optional<Role> existingRoleOptional = roleRepository.findByName(role.getName());
-                Role existingRole = existingRoleOptional.orElseGet(() -> {
-                    // Optionally, create the role if it doesn't exist
-                    roleRepository.save(role);
-                    return role;
-                });
-                roles.add(existingRole);
+            for (String roleName : signUpRequest.getRoles()) {
+                try {
+                    // Convertir le nom du rôle en ERole (Enum)
+                    ERole enumRole = ERole.valueOf(roleName);
+
+                    // Chercher le rôle dans la base de données
+                    Role role = roleRepository.findByName(enumRole)
+                        .orElseThrow(() -> new RuntimeException("Role not found in DB: " + enumRole));
+
+                    // Ajouter le rôle à l'ensemble
+                    roles.add(role);
+                } catch (IllegalArgumentException ex) {
+                    // Si le rôle est invalide ou non défini dans l'Enum
+                    throw new RuntimeException("Invalid role: " + roleName);
+                }
             }
-            signUpRequest.setRoles(roles);
 
-            // Save the user to the database
-            userRepository.save(signUpRequest);
+            // 4) Assigner les rôles et sauvegarder l'utilisateur
+            user.setRoles(roles);
+            userRepository.save(user);
 
-            return ResponseHandler.generateResponse("User registered successfully", HttpStatus.CREATED, null);
+            return ResponseHandler.generateResponse(
+                "User registered successfully",
+                HttpStatus.CREATED,
+                null
+            );
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseHandler.generateResponse("Failed to sign up", HttpStatus.INTERNAL_SERVER_ERROR, null);
+            return ResponseHandler.generateResponse(
+                "Failed to sign up",
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                null
+            );
         }
     }
 

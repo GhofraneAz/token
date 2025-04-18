@@ -15,6 +15,10 @@ public class AuthRequest {
 	public void setPassword(String password) {
 		this.password = password;
 	}
+	public Object getEmail() {
+		// TODO Auto-generated method stub
+		return null;
+	}
     
     
     
